@@ -39,9 +39,13 @@ SELECT TOP 5 prm.PURCHASE_REQ_ID, prm.PURCHASE_REQ_NO
 """
 
 
-def _get_conn_str() -> str:
+RASMASTER_DB = "rasmaster"
+RASMASTER_SCHEMA = "dbo"
+
+
+def _get_conn_str(db_override: str = None) -> str:
     server = os.getenv("AZURE_SERVER", "")
-    db = os.getenv("AZURE_DB", "")
+    db = db_override or os.getenv("AZURE_DB", "")
     user = os.getenv("AZURE_USER", "")
     pwd = os.getenv("AZURE_PASS", "")
 
@@ -158,30 +162,38 @@ def _dump_sample_rows(cursor, schema: str, table: str, where: str, f, limit: int
 
 
 def main() -> None:
+    # Main DB (ras-procurement-benchmark) for purchase tables
     conn_str = _get_conn_str()
-    print(f"Connecting to Azure SQL...")
+    print(f"Connecting to Azure SQL ({os.getenv('AZURE_DB')})...")
     conn = pyodbc.connect(conn_str, autocommit=True)
     cursor = conn.cursor()
-    print("Connected.")
+    print("Connected to main DB.")
+
+    # rasmaster DB for vw_get_ras_data_for_bidashboard (table, not view)
+    rm_conn_str = _get_conn_str(db_override=RASMASTER_DB)
+    print(f"Connecting to Azure SQL ({RASMASTER_DB})...")
+    rm_conn = pyodbc.connect(rm_conn_str, autocommit=True)
+    rm_cursor = rm_conn.cursor()
+    print("Connected to rasmaster DB.")
 
     out_path = pathlib.Path(__file__).parent / "db_schema_info.txt"
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("Database Schema Inspection\n")
         f.write(f"Generated for quotation_extraction context enrichment\n")
-        f.write(f"Server: {os.getenv('AZURE_SERVER')}\n")
-        f.write(f"Database: {os.getenv('AZURE_DB')}\n\n")
+        f.write(f"Main DB: {os.getenv('AZURE_SERVER')} / {os.getenv('AZURE_DB')}\n")
+        f.write(f"Rasmaster DB: {os.getenv('AZURE_SERVER')} / {RASMASTER_DB}\n\n")
 
-        # 1. DDL for tables
+        # 1. DDL for tables (main DB)
         for tbl in TABLES:
             _dump_columns(cursor, SCHEMA, tbl, f, "TABLE")
 
-        # 2. DDL for views
+        # 2. DDL for vw_get table (rasmaster DB, dbo schema)
         for vw in VIEWS:
-            _dump_columns(cursor, SCHEMA, vw, f, "VIEW")
+            _dump_columns(rm_cursor, RASMASTER_SCHEMA, vw, f, "TABLE (rasmaster DB)")
 
         # 3. Sample RAS records
-        _write_section(f, "SAMPLE DATA: 2-3 RAS records from 2026")
+        _write_section(f, "SAMPLE DATA: 5 RAS records from 2026")
 
         cursor.execute(_SAMPLE_RAS_SQL)
         sample_ras = cursor.fetchall()
@@ -194,26 +206,26 @@ def main() -> None:
                 f.write(f"  RAS: {req_no}  (PURCHASE_REQ_ID = {req_id})\n")
                 f.write(f"{'~' * 70}\n")
 
-                f.write(f"\n  >> purchase_req_mst:\n")
+                f.write(f"\n  >> purchase_req_mst (main DB):\n")
                 _dump_sample_rows(
                     cursor, SCHEMA, "purchase_req_mst",
                     f"PURCHASE_REQ_ID = {req_id}", f, limit=1,
                 )
 
-                f.write(f"\n  >> purchase_req_detail:\n")
+                f.write(f"\n  >> purchase_req_detail (main DB):\n")
                 _dump_sample_rows(
                     cursor, SCHEMA, "purchase_req_detail",
                     f"PURCHASE_REQ_ID = {req_id}", f, limit=20,
                 )
 
-                f.write(f"\n  >> vw_get_ras_data_for_bidashboard:\n")
+                f.write(f"\n  >> vw_get_ras_data_for_bidashboard (rasmaster DB):\n")
                 _dump_sample_rows(
-                    cursor, SCHEMA, "vw_get_ras_data_for_bidashboard",
+                    rm_cursor, RASMASTER_SCHEMA, "vw_get_ras_data_for_bidashboard",
                     f"PURCHASE_REQ_ID = {req_id}", f, limit=5,
                 )
 
                 # Also check if this RAS has any attachments classified
-                f.write(f"\n  >> AttachmentClassification:\n")
+                f.write(f"\n  >> AttachmentClassification (main DB):\n")
                 _dump_sample_rows(
                     cursor, SCHEMA, "AttachmentClassification",
                     f"purchase_req_no_fk = '{req_no}'", f, limit=10,
@@ -242,6 +254,7 @@ def main() -> None:
                     f.write(f"  (query failed: {e})\n")
 
     conn.close()
+    rm_conn.close()
     print(f"\nDone! Output written to: {out_path}")
     print(f"File size: {out_path.stat().st_size:,} bytes")
 
