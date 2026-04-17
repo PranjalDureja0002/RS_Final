@@ -22,7 +22,7 @@ TABLES = [
     "purchase_req_detail",
 ]
 
-VIEWS = [
+RASMASTER_TABLES = [
     "vw_get_ras_data_for_bidashboard",
 ]
 
@@ -189,8 +189,8 @@ def main() -> None:
             _dump_columns(cursor, SCHEMA, tbl, f, "TABLE")
 
         # 2. DDL for vw_get table (rasmaster DB, dbo schema)
-        for vw in VIEWS:
-            _dump_columns(rm_cursor, RASMASTER_SCHEMA, vw, f, "TABLE (rasmaster DB)")
+        for tbl in RASMASTER_TABLES:
+            _dump_columns(rm_cursor, RASMASTER_SCHEMA, tbl, f, "TABLE (rasmaster DB)")
 
         # 3. Sample RAS records
         _write_section(f, "SAMPLE DATA: 5 RAS records from 2026")
